@@ -1,5 +1,7 @@
 # Trabajo práctico — Procesamiento puntual e histograma (Grupo 1)
 
+**Repositorio público:** [github.com/mateoHernandez123/procesamiento-imagenes-tp2-grupo1](https://github.com/mateoHernandez123/procesamiento-imagenes-tp2-grupo1)
+
 **Materia:** Procesamiento de imágenes I  
 **Integrantes:** Mateo Hernández, Felipe Lucero
 
@@ -82,37 +84,3 @@ python src/procesamiento_imagen.py --no-panel-png
 Ya **no** se generan `histograma_*.csv` ni `histograma_*.svg` (sustituidos por matplotlib).
 
 Para más detalle teórico y respuestas a la consigna, ver **`doc-info.md`**.
-
-## Nota sobre rutas en Windows
-
-Si la ruta del proyecto incluye caracteres especiales (por ejemplo “Año”, “N°”), el script evita el fallo conocido de `cv2.imread` cambiando al directorio del archivo antes de leerlo.
-
-## Entrega académica (cátedra)
-
-Comprimir la carpeta con un nombre del estilo **TP2 - Grupo 1**, incluyendo `entrada`, `salida` regenerada, `src`, `README.md`, `doc-info.md` y `requirements.txt`, según lo que pida la materia.
-
-## Publicar en GitHub (repositorio público)
-
-Desde la raíz del proyecto, con [Git](https://git-scm.com/) instalado:
-
-```bash
-git init
-git add .
-git commit -m "TP Procesamiento de imágenes I — Grupo 1"
-```
-
-Opción A — [GitHub CLI](https://cli.github.com/) (`gh auth login` una vez):
-
-```bash
-gh repo create NOMBRE-DEL-REPO --public --source=. --remote=origin --push
-```
-
-Opción B — en [github.com/new](https://github.com/new) creá un repositorio vacío **público**, sin README, y luego:
-
-```bash
-git remote add origin https://github.com/TU_USUARIO/NOMBRE-DEL-REPO.git
-git branch -M main
-git push -u origin main
-```
-
-Sugerencia de nombre de repo: `procesamiento-imagenes-tp2-grupo1` (sin espacios ni caracteres raros).
