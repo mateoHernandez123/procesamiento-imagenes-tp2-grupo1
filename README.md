@@ -9,15 +9,15 @@ Este repositorio contiene el código y la documentación para el trabajo sobre c
 
 ## Estructura del proyecto
 
-| Ruta                          | Descripción                                                         |
-| ----------------------------- | ------------------------------------------------------------------- |
-| `entrada/`                    | Imagen original de trabajo (por defecto `imagen.jpg`).              |
-| `salida/`                     | BMP, `panel_imagenes.png`, `panel_histogramas.png`, `reporte_...`.  |
-| `salida/archivo_previo/`      | Capturas PNG obtenidas en clase (referencia).                       |
-| `src/procesamiento_imagen.py` | Programa principal.                                                 |
-| `doc-info.md`                 | Respuestas técnicas y justificación de decisiones (consignas).      |
-| `requirements.txt`          | OpenCV (lectura) y matplotlib (visualización).                      |
-| `.gitignore`                | No versiona la salida regenerable; sí `entrada/` y `salida/archivo_previo/`. |
+| Ruta                          | Descripción                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `entrada/`                    | Imagen original de trabajo (por defecto `imagen.jpg`).                       |
+| `salida/`                     | BMP, `panel_imagenes.png`, `panel_histogramas.png`, `reporte_...`.           |
+| `salida/archivo_previo/`      | Capturas PNG obtenidas en clase (referencia).                                |
+| `src/procesamiento_imagen.py` | Programa principal.                                                          |
+| `doc-info.md`                 | Respuestas técnicas y justificación de decisiones (consignas).               |
+| `requirements.txt`            | OpenCV (lectura) y matplotlib (visualización).                               |
+| `.gitignore`                  | No versiona la salida regenerable; sí `entrada/` y `salida/archivo_previo/`. |
 
 ## Requisitos
 
@@ -80,7 +80,5 @@ python src/procesamiento_imagen.py --no-panel-png
 - `panel_imagenes.png` — captura de la primera ventana (entrada, grises, máscara, resultado).
 - `panel_histogramas.png` — captura de la segunda ventana (los dos histogramas; conteos calculados a mano en el script).
 - `reporte_procesamiento.txt` — resumen numérico (dimensiones, promedio, si hubo mejora, umbral).
-
-Ya **no** se generan `histograma_*.csv` ni `histograma_*.svg` (sustituidos por matplotlib).
 
 Para más detalle teórico y respuestas a la consigna, ver **`doc-info.md`**.
