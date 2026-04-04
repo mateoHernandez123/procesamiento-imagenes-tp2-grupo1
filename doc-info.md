@@ -17,7 +17,7 @@ Si la imagen de entrada está en color (tres canales B, G, R en el orden que dev
 Y = \mathrm{round}(0{,}299\,R + 0{,}587\,G + 0{,}114\,B)
 \]
 
-El resultado se recorta al rango \([0, 255]\). En el código se implementa como `int(0.299*r + 0.587*g + 0.114*b + 0.5)`, equivalente al redondeo. No se usa ninguna función de “convertir a grises” de la librería: solo lectura de los tres números por píxel y la cuenta en Python puro (listas anidadas).
+El resultado se recorta al rango \([0, 255]\). En el código se aplica la misma fórmula de forma **vectorizada** con **NumPy** (`float32` por canal, `np.rint` y `np.clip`), sin usar `cv2.cvtColor`.
 
 Si la entrada ya fuera un solo canal, el mismo programa podría adaptarse copiando ese canal; en nuestro caso la imagen de trabajo es a color y se convierte como arriba.
 
@@ -29,7 +29,7 @@ Si la entrada ya fuera un solo canal, el mismo programa podría adaptarse copian
 
 Se define un arreglo de 256 contadores, inicialmente en cero. Se recorre toda la imagen en grises y, para cada nivel \(i \in \{0,\ldots,255\}\), se incrementa `hist[i]`.
 
-**Mostrar:** los 256 conteos del histograma se calculan **a mano** en el script. Para visualizar al ejecutar se usa **matplotlib** en **dos pasos**: primero una ventana solo con las imágenes (entrada, grises, máscara, resultado); al cerrarla, otra ventana con los dos gráficos de barras. No recalcula el histograma; solo dibuja valores ya obtenidos. Con `--no-mostrar` se guardan igual **`salida/panel_imagenes.png`** y **`salida/panel_histogramas.png`**.
+**Mostrar:** los 256 conteos se obtienen con **`np.bincount`** sobre la imagen en gris (equivalente a contar por nivel, pero eficiente en C). Para visualizar al ejecutar se usa **matplotlib** en **dos pasos**: primero una ventana solo con las imágenes (entrada, grises, máscara, resultado); al cerrarla, otra ventana con los dos gráficos de barras. No recalcula el histograma; solo dibuja valores ya obtenidos. Con `--no-mostrar` se guardan igual **`salida/panel_imagenes.png`** y **`salida/panel_histogramas.png`**.
 
 No se generan archivos CSV ni SVG del histograma (eran poco claros como figura); la consigna de “mostrar” el histograma queda cubierta por la segunda ventana interactiva y por `panel_histogramas.png`.
 
@@ -41,7 +41,7 @@ El histograma del **gris original** sirve para ver si la imagen está concentrad
 
 **Consigna:** mejorar con procesamiento puntual, **no** filtros espaciales.
 
-Se calcula el **promedio de intensidad** del gris original recorriendo todos los píxeles y sumando manualmente. Si el promedio es menor que un umbral bajo (por defecto 50) o mayor que uno alto (por defecto 200), se aplica **normalización lineal** (estiramiento de contraste), también píxel a píxel:
+Se calcula el **promedio de intensidad** del gris original con **`gris.mean()`** (NumPy). Si el promedio es menor que un umbral bajo (por defecto 50) o mayor que uno alto (por defecto 200), se aplica **normalización lineal** (estiramiento de contraste) de forma vectorizada:
 
 1. Se obtienen \(v*{\min}\) y \(v*{\max}\) del gris original con un solo barrido.
 2. Si \(v*{\max} > v*{\min}\), para cada píxel \(v\):
@@ -86,20 +86,21 @@ Así la composición cumple: imagen en escala de grises en RGB y acento en rojo 
 
 ## 6. Librerías: qué usamos, para qué, y qué queda explícitamente a mano
 
-### 6.1 Principio (consigna: cálculos manuales y matemáticos)
+### 6.1 Principio (fórmulas del TP + eficiencia con NumPy)
 
-En este trabajo, **“hacer las cuentas a mano”** significa: toda la parte de **procesamiento de la imagen** (transformar y combinar valores de intensidad, armar el histograma, decidir y aplicar umbrales, construir la máscara y la imagen final) está implementada en el código con **fórmulas escritas explícitamente** y **bucles** sobre listas de Python.
+Siguiendo la orientación de la materia, el **procesamiento numérico** (grises, histograma, estadísticas, normalización puntual, Otsu, umbral, máscara, composición) está implementado con **fórmulas explícitas** en el script usando **NumPy** sobre arreglos `uint8` / `float32`, en lugar de bucles escalar-lento en Python puro.
 
-**No** usamos —para eso— funciones de bibliotecas como OpenCV, NumPy, SciPy, Pillow, scikit-image, etc. En particular **no** usamos de OpenCV: `cvtColor`, `calcHist`, `equalizeHist`, `normalize`, `threshold`, filtros convolucionales, morfología, ni `imwrite` para los entregables del pipeline.
+**No** usamos las rutinas de alto nivel de OpenCV para ese pipeline: en particular **no** usamos `cvtColor`, `calcHist`, `equalizeHist`, `normalize`, `threshold`, filtros convolucionales, morfología, ni `imwrite` para los entregables.
 
-Las dependencias de terceros son **OpenCV** (solo **entrada** de datos) y **matplotlib** (solo **visualización** del panel; ver tabla). El **guardado** de las imágenes del pipeline no pasa por OpenCV: los **BMP** se escriben con la biblioteca estándar.
+Las dependencias son **NumPy** (cálculo), **OpenCV** (solo **`imread`** para decodificar la entrada) y **matplotlib** (solo paneles). Los **BMP** se arman con **stdlib** (`struct` + bytes de píxeles generados desde arreglos NumPy).
 
 ### 6.2 Tabla: cada caso de uso de librería / módulo
 
 | Qué se importa          | Motivo por el que está en el proyecto                                                                                                           | Uso concreto que le damos                                                                                                                                                                                                        | Qué **no** hacemos con eso                                                                                                                                                                                   |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **OpenCV (`cv2`)**      | Decodificar archivos comprimidos o en formatos binarios estándar (JPEG, PNG, etc.) sin implementar nosotros un decodificador completo en el TP. | **Solo** `cv2.imread`: leer el archivo de entrada y obtener valores numéricos por canal (BGR). Inmediatamente después copiamos esos valores a **listas de Python** y el resto del programa trabaja únicamente sobre esas listas. | Cualquier operación de procesamiento de imagen de OpenCV (ver lista arriba). OpenCV **no** calcula el gris, el histograma, el umbral de Otsu, la máscara ni la imagen compuesta: eso lo hace nuestro código. |
-| **matplotlib**          | Presentación: dos ventanas secuenciales (imágenes, luego histogramas) y dos PNG opcionales.                                                     | `imshow` y `bar` con listas ya calculadas; BGR→RGB solo para dibujo.                                                                                                                                                             | No implementa `calcHist` ni operaciones del TP: el histograma sigue siendo el arreglo de 256 enteros llenado en bucles.                                                                                      |
+| **NumPy (`np`)**        | Operaciones matriciales eficientes sobre la imagen.                                                                                              | Rec. 601 vectorizada, `bincount` para histograma, `min`/`max`/`mean`, normalización puntual, `where` para máscara y composición, Otsu con aritmética sobre el histograma.                                                         | No reemplaza la lógica del TP por llamadas a `cv2` ni a `skimage`.                                                                                                                                            |
+| **OpenCV (`cv2`)**      | Decodificar archivos comprimidos o en formatos binarios estándar (JPEG, PNG, etc.) sin implementar nosotros un decodificador completo en el TP. | **Solo** `cv2.imread`: leer el archivo de entrada y obtener `ndarray` BGR. El pipeline numérico sigue en funciones propias con NumPy.                                                                                             | Cualquier operación de procesamiento de imagen de OpenCV (ver lista arriba).                                                                                                                                 |
+| **matplotlib**          | Presentación: dos ventanas secuenciales (imágenes, luego histogramas) y dos PNG opcionales.                                                     | `imshow` y `bar` con arreglos ya calculados; BGR→RGB solo para dibujo.                                                                                                                                                           | No calcula el histograma ni las transformaciones puntuales del TP.                                                                                                                                            |
 | **`argparse`** (stdlib) | Interfaz de línea de comandos estándar.                                                                                                         | Definir opciones (`-i`, `-o`, `-u`, flags).                                                                                                                                                                                      | Nada relacionado con píxeles.                                                                                                                                                                                |
 | **`os`** (stdlib)       | Compatibilidad de rutas en Windows.                                                                                                             | `chdir` al directorio del archivo antes de `imread`, porque `cv2.imread` a veces falla con rutas con caracteres Unicode.                                                                                                         | No participa en matemática de imagen.                                                                                                                                                                        |
 | **`struct`** (stdlib)   | Empaquetar enteros en bytes según el formato de archivo.                                                                                        | Escribir las cabeceras del **BMP** (tamaños, dimensiones, desplazamientos).                                                                                                                                                      | No procesa contenido semántico de la imagen; solo formato de disco.                                                                                                                                          |
@@ -108,13 +109,11 @@ Las dependencias de terceros son **OpenCV** (solo **entrada** de datos) y **matp
 
 ### 6.3 Detalle: por qué OpenCV solo en la lectura
 
-Leer un JPEG o PNG implica tablas Huffman, IDCT, espacios de color del contenedor, etc. Eso es **ingeniería de formato de archivo**, no el objetivo pedagógico del TP (histograma, puntual, umbral). Por eso se admite **una** llamada de lectura para obtener la matriz de muestras; a partir de ahí, el trabajo exigible (**cálculos solo a mano y matemáticamente** sobre esas muestras) ocurre en funciones propias del script.
-
-OpenCV, al leer, puede devolver internamente un arreglo que en la práctica está respaldado por NumPy; **nosotros no importamos NumPy** y no usamos ese arreglo para operaciones vectorizadas: lo convertimos a `list` y todas las operaciones son escalares en bucles, como en un pseudocódigo matemático píxel a píxel.
+Leer un JPEG o PNG implica tablas Huffman, IDCT, espacios de color del contenedor, etc. Eso es **ingeniería de formato de archivo**, no el objetivo pedagógico del TP (histograma, puntual, umbral). Por eso se admite **una** llamada de lectura para obtener la matriz de muestras; a partir de ahí, el trabajo exigible (**fórmulas del TP sobre esas muestras**) ocurre en funciones propias del script con **NumPy**.
 
 ### 6.4 Resumen en una frase
 
-**Entrada:** OpenCV solo para **abrir** el archivo y obtener números. **Procesamiento:** matemática y lógica **implementadas en el código**, sin delegar en OpenCV ni en otras librerías de imagen. **Vista:** matplotlib dibuja resultados ya calculados. **Salida:** BMP con **stdlib** (`struct` + escritura binaria).
+**Entrada:** OpenCV solo para **abrir** el archivo. **Procesamiento:** fórmulas del TP en **código propio** con **NumPy** (sin `cvtColor` / `threshold` / etc.). **Vista:** matplotlib dibuja resultados ya calculados. **Salida:** BMP con **stdlib** + bytes de píxeles desde arreglos NumPy.
 
 ---
 
@@ -141,8 +140,8 @@ Si en Windows la ruta del proyecto tiene caracteres Unicode y hubiera problemas 
 
 | Ítem                | Cómo se aborda                                                        |
 | ------------------- | --------------------------------------------------------------------- |
-| Grises              | Fórmula BT.601 manual por píxel.                                      |
-| Histograma          | 256 bins a mano; barras en segunda ventana / `panel_histogramas.png`. |
+| Grises              | Fórmula BT.601 vectorizada con NumPy (sin `cvtColor`).                |
+| Histograma          | 256 bins con `np.bincount`; barras en segunda ventana / PNG.         |
 | Mejora oscuro/claro | Normalización lineal puntual según promedio.                          |
 | Máscara             | Umbral manual u Otsu manual sobre histograma; binarización explícita. |
 | Salida rojo + gris  | BGR: rojo en máscara; \(B=G=R\) con gris **original** fuera.          |

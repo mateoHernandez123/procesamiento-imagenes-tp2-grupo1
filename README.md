@@ -16,25 +16,26 @@ Este repositorio contiene el código y la documentación para el trabajo sobre c
 | `salida/archivo_previo/`      | Capturas PNG obtenidas en clase (referencia).                                |
 | `src/procesamiento_imagen.py` | Programa principal.                                                          |
 | `doc-info.md`                 | Respuestas técnicas y justificación de decisiones (consignas).               |
-| `requirements.txt`            | OpenCV (lectura) y matplotlib (visualización).                               |
+| `requirements.txt`            | NumPy (pipeline), OpenCV (lectura) y matplotlib (visualización).             |
 | `.gitignore`                  | No versiona la salida regenerable; sí `entrada/` y `salida/archivo_previo/`. |
 
 ## Requisitos
 
 - Python 3.10 o superior recomendado.
-- **opencv-python** (solo lectura del archivo) y **matplotlib** (dos ventanas secuenciales y dos PNG en `salida/`; no calcula el histograma).
+- **NumPy** (operaciones vectorizadas del TP), **opencv-python** (solo lectura) y **matplotlib** (paneles; no sustituye las fórmulas del script).
 
-## Qué librería usamos y para qué (cálculos a mano)
+## Qué librería usamos y para qué
 
-**Regla del trabajo:** la **matemática y la lógica sobre los píxeles** (grises, histograma, promedios, mín/máx, normalización puntual, Otsu, umbral, máscara, imagen final) se hace **solo en nuestro código**, con fórmulas explícitas y bucles sobre listas. **No** usamos OpenCV, NumPy ni otras librerías para esas operaciones.
+**Regla del trabajo:** las **fórmulas del TP** (Rec. 601, histograma, estadísticas, normalización puntual, Otsu, umbral, máscara, composición) están implementadas en **nuestro código** con NumPy (broadcasting y funciones sobre arreglos), **sin** delegar el pipeline en `cv2.cvtColor`, `calcHist`, `threshold`, etc., tal como se recomienda en cátedra para reducir costo computacional frente a bucles puros en Python.
 
 | Herramienta                                                            | Por qué está                                                                   | Uso que le damos                                                                                    | Qué **no** hacemos con ella                                                            |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| **OpenCV (`cv2`)**                                                     | Decodificar JPEG/PNG sin implementar un lector de formato.                     | **Únicamente** `cv2.imread` para obtener valores BGR por píxel; luego se copian a listas de Python. | `cvtColor`, `calcHist`, `threshold`, filtros, `imwrite` en los resultados del TP, etc. |
-| **matplotlib**                                                         | Dos ventanas al ejecutar (imágenes, luego histogramas) y dos PNG en `salida/`. | `imshow` / `bar` con datos **ya calculados**; BGR→RGB solo para dibujar.                            | No calcula histogramas ni transforma píxeles del TP.                                   |
+| **NumPy**                                                              | Eficiencia en matrices de imagen.                                              | Grises, `bincount` para histograma, min/max/mean, normalización, máscara, imagen final en arreglos. | No usamos APIs de alto nivel de OpenCV/scikit-image para esos pasos.                    |
+| **OpenCV (`cv2`)**                                                     | Decodificar JPEG/PNG sin implementar un lector de formato.                     | **Únicamente** `cv2.imread` para obtener BGR como `ndarray`.                                          | `cvtColor`, `calcHist`, `threshold`, filtros, `imwrite` en el pipeline del TP.        |
+| **matplotlib**                                                         | Dos ventanas al ejecutar (imágenes, luego histogramas) y dos PNG en `salida/`. | `imshow` / `bar` con datos **ya calculados**; BGR→RGB solo para dibujar.                            | No calcula el histograma ni las transformaciones puntuales del TP.                   |
 | **Biblioteca estándar** (`argparse`, `os`, `struct`, `pathlib`, `sys`) | CLI, rutas, bug de rutas Unicode en Windows, formato BMP, errores.             | Argumentos, `chdir` solo para leer, cabeceras binarias del BMP, rutas y mensajes.                   | Ningún algoritmo de procesamiento de imagen.                                           |
 
-Los BMP de salida se generan con **`struct` + escritura binaria** (stdlib), sin NumPy ni `cv2.imwrite`.
+Los BMP de salida se escriben con **`struct` + bytes** (cabecera) y **píxeles desde NumPy** (`tobytes` por filas con relleno), sin `cv2.imwrite`.
 
 El detalle extendido (incluida la distinción entre “abrir archivo” y “procesar imagen”) está en **`doc-info.md`, sección 6**.
 
@@ -78,7 +79,7 @@ python src/procesamiento_imagen.py --no-panel-png
 - `mascara.bmp` — máscara binaria (0 / 255).
 - `resultado_final.bmp` — RGB: fondo en gris (como la luminancia original) y región segmentada en rojo.
 - `panel_imagenes.png` — captura de la primera ventana (entrada, grises, máscara, resultado).
-- `panel_histogramas.png` — captura de la segunda ventana (los dos histogramas; conteos calculados a mano en el script).
+- `panel_histogramas.png` — captura de la segunda ventana (histogramas con conteos vía `np.bincount`).
 - `reporte_procesamiento.txt` — resumen numérico (dimensiones, promedio, si hubo mejora, umbral).
 
 Para más detalle teórico y respuestas a la consigna, ver **`doc-info.md`**.
