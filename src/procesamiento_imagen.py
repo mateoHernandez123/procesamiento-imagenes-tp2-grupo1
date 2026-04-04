@@ -1,32 +1,20 @@
 #!/usr/bin/env python3
 """
-Procesamiento puntual de imágenes — operaciones sobre píxeles hechas a mano.
+Procesamiento puntual de imágenes — fórmulas del TP con arreglos NumPy.
 
-Cálculos de imagen (matemática sobre valores de píxeles)
-    Grises, histograma, estadísticas, normalización puntual, Otsu, umbral,
-    máscara y composición final: todo con bucles, sumas, productos y
-    comparaciones en Python sobre listas anidadas. No se usa OpenCV ni NumPy
-    ni otras librerías para esas operaciones.
+Las operaciones (grises Rec. 601, histograma, estadísticas, normalización
+puntual, Otsu, umbral, máscara, composición) están implementadas en este
+módulo sin usar ``cv2.cvtColor``, ``calcHist``, ``threshold``, etc. Se usa
+NumPy de forma vectorizada para reducir costo computacional, como se recomienda
+en la materia.
 
-Librerías externas y su único rol
-    opencv-python (cv2): solo ``cv2.imread`` para decodificar el archivo de
-    entrada (JPEG/PNG) y obtener números por canal. Equivale a “abrir el
-    archivo y leer los píxeles”; no reemplaza fórmulas ni algoritmos del TP.
-    Los valores se copian enseguida a ``list`` de Python; el resto del
-    programa no usa la matriz de OpenCV.
+Librerías
+    opencv-python: ``cv2.imread`` para decodificar la entrada.
+    numpy: matrices uint8/float32 para el pipeline numérico.
+    matplotlib: solo visualización de paneles (imágenes e histogramas).
+    struct + stdlib: cabeceras BMP; píxeles desde arreglos contiguos.
 
-Biblioteca estándar de Python
-    argparse, os, struct, pathlib, sys — igual que antes.
-
-matplotlib (solo visualización)
-    Al ejecutar el script se abre primero una ventana solo con las imágenes del
-    flujo; al cerrarla, otra ventana con los dos histogramas (conteos a mano;
-    matplotlib solo dibuja). Opcionalmente se guardan ``panel_imagenes.png`` y
-    ``panel_histogramas.png`` en ``salida/``.
-
-Salida en disco
-    BMP del pipeline (misma implementación manual). Ya no se generan CSV/SVG
-    de histograma (sustituidos por la vista en matplotlib).
+Salida: BMP en ``salida/``, paneles PNG opcionales, ``reporte_procesamiento.txt``.
 """
 
 from __future__ import annotations
@@ -37,35 +25,30 @@ import struct
 import sys
 from pathlib import Path
 
-# OpenCV: solo imread (decodificar entrada). No se usa para grises, hist, umbral, etc.
 try:
     import cv2
 except ImportError:
     print("Falta OpenCV. Ejecute: pip install -r requirements.txt", file=sys.stderr)
     sys.exit(1)
 
+try:
+    import numpy as np
+except ImportError:
+    print("Falta NumPy. Ejecute: pip install -r requirements.txt", file=sys.stderr)
+    sys.exit(1)
+
 
 def raiz_proyecto() -> Path:
-    """
-    Ubica la carpeta raíz del proyecto (un nivel arriba de ``src/``).
-
-    Procesa: ningún dato de imagen; solo la ruta del archivo actual.
-    Retorna: ``Path`` absoluto al directorio que contiene ``entrada/``, ``salida/``, etc.
-    """
+    """Raíz del proyecto (directorio que contiene ``entrada/``, ``salida/``)."""
     return Path(__file__).resolve().parent.parent
 
 
-def cargar_bgr_opencv(ruta: Path) -> list[list[list[int]]] | None:
+def cargar_bgr_opencv(ruta: Path) -> np.ndarray | None:
     """
-    Lee un archivo de imagen (JPEG/PNG, etc.) y devuelve píxeles BGR en listas de Python.
+    Lee imagen (JPEG/PNG, etc.) y devuelve ``uint8`` con forma (H, W, 3) BGR.
 
-    Qué hace: usa solo ``cv2.imread``; ante rutas con caracteres no ASCII en Windows,
-    cambia al directorio del archivo antes de leer. Copia cada canal a enteros en
-    ``list[list[list[int]]]`` (sin usar esa matriz para el resto del procesamiento).
-
-    Procesa: la ruta ``ruta`` al archivo de imagen en disco.
-    Retorna: matriz ``[fila][columna] = [B, G, R]`` en 0..255, o ``None`` si no existe
-    el archivo o falla la decodificación.
+    Usa ``cv2.imread``; en Windows, ``chdir`` al directorio del archivo si la ruta
+    tiene caracteres no ASCII.
     """
     ruta = ruta.resolve()
     if not ruta.is_file():
@@ -78,39 +61,32 @@ def cargar_bgr_opencv(ruta: Path) -> list[list[list[int]]] | None:
         os.chdir(anterior)
     if arr is None:
         return None
-    alto, ancho = arr.shape[0], arr.shape[1]
-    return [
-        [[int(arr[y, x, 0]), int(arr[y, x, 1]), int(arr[y, x, 2])] for x in range(ancho)]
-        for y in range(alto)
-    ]
+    return np.ascontiguousarray(arr, dtype=np.uint8)
 
 
-def escribir_bmp_bgr(ruta: Path, pixeles: list[list[list[int]]]) -> None:
+def escribir_bmp_bgr(ruta: Path, pixeles: np.ndarray) -> None:
     """
-    Escribe un archivo BMP de 24 bits (sin compresión) en disco.
-
-    Qué hace: arma cabeceras BITMAPFILEHEADER + BITMAPINFOHEADER con ``struct`` y
-    escribe píxeles en orden BGR, filas de abajo hacia arriba, con relleno por fila.
-
-    Procesa: ``pixeles[y][x] = [b, g, r]`` en 0..255 y la ruta ``ruta`` de salida.
-    Retorna: ``None`` (efecto lateral: crea o sobrescribe el archivo BMP).
+    Escribe BMP 24 bits. ``pixeles`` debe ser (alto, ancho, 3) BGR ``uint8``.
     """
-    alto = len(pixeles)
-    ancho = len(pixeles[0])
+    if pixeles.ndim != 3 or pixeles.shape[2] != 3:
+        raise ValueError("pixeles: se espera forma (H, W, 3)")
+    pixeles = np.ascontiguousarray(pixeles, dtype=np.uint8)
+    alto, ancho = int(pixeles.shape[0]), int(pixeles.shape[1])
     row_stride = ((24 * ancho + 31) // 32) * 4
     tam_img = row_stride * alto
     tam_archivo = 14 + 40 + tam_img
 
-    bloques: list[bytes] = []
-    for y in range(alto - 1, -1, -1):
-        fila = bytearray()
-        for x in range(ancho):
-            b, g, r = pixeles[y][x]
-            fila.extend((int(b) & 255, int(g) & 255, int(r) & 255))
-        while len(fila) < row_stride:
-            fila.append(0)
-        bloques.append(bytes(fila))
-    datos_pixeles = b"".join(bloques)
+    flipped = np.flip(pixeles, axis=0)
+    pad = row_stride - 3 * ancho
+    if pad == 0:
+        datos_pixeles = flipped.tobytes()
+    else:
+        bloques: list[bytes] = []
+        for y in range(alto):
+            row = bytearray(flipped[y].tobytes())
+            row.extend(b"\x00" * pad)
+            bloques.append(bytes(row))
+        datos_pixeles = b"".join(bloques)
 
     cabecera = struct.pack("<2sIHHI", b"BM", tam_archivo, 0, 0, 54)
     dib = struct.pack(
@@ -134,132 +110,61 @@ def escribir_bmp_bgr(ruta: Path, pixeles: list[list[list[int]]]) -> None:
         f.write(datos_pixeles)
 
 
-def a_grises(img_bgr: list[list[list[int]]]) -> list[list[int]]:
+def a_grises(img_bgr: np.ndarray) -> np.ndarray:
     """
-    Convierte imagen a escala de grises con luminancia ITU-R BT.601.
-
-    Qué hace: por cada píxel aplica ``Y = round(0.299*R + 0.587*G + 0.114*B)`` y recorta a 0..255.
-
-    Procesa: ``img_bgr[y][x] = [B, G, R]`` (orden OpenCV).
-    Retorna: ``gris[y][x]`` entero en 0..255, misma altura y ancho.
+    Luminancia ITU-R BT.601: Y = round(0.299 R + 0.587 G + 0.114 B), recorte 0..255.
+    OpenCV almacena B, G, R en los ejes del canal.
     """
-    alto = len(img_bgr)
-    ancho = len(img_bgr[0])
-    gris = [[0 for _ in range(ancho)] for _ in range(alto)]
-    for y in range(alto):
-        for x in range(ancho):
-            b, g, r = img_bgr[y][x]
-            # ITU-R BT.601: luminancia
-            v = int(0.299 * r + 0.587 * g + 0.114 * b + 0.5)
-            if v > 255:
-                v = 255
-            elif v < 0:
-                v = 0
-            gris[y][x] = v
-    return gris
+    b = img_bgr[:, :, 0].astype(np.float32)
+    g = img_bgr[:, :, 1].astype(np.float32)
+    r = img_bgr[:, :, 2].astype(np.float32)
+    y = np.rint(0.299 * r + 0.587 * g + 0.114 * b)
+    return np.clip(y, 0, 255).astype(np.uint8)
 
 
-def histograma(gris: list[list[int]], alto: int, ancho: int) -> list[int]:
-    """
-    Cuenta cuántos píxeles hay por cada nivel de gris (0..255).
-
-    Qué hace: recorre toda la imagen e incrementa ``hist[v]`` por cada intensidad ``v``.
-
-    Procesa: matriz ``gris`` y dimensiones ``alto`` × ``ancho``.
-    Retorna: lista de 256 enteros ``hist[i]`` = cantidad de píxeles con nivel ``i``.
-    """
-    hist = [0] * 256
-    for y in range(alto):
-        for x in range(ancho):
-            hist[gris[y][x]] += 1
-    return hist
+def histograma(gris: np.ndarray) -> np.ndarray:
+    """Histograma 0..255 con ``np.bincount``."""
+    return np.bincount(gris.ravel(), minlength=256).astype(np.int64)
 
 
-def estadisticas_basicas(
-    gris: list[list[int]], alto: int, ancho: int
-) -> tuple[int, int, float]:
-    """
-    Obtiene mínimo, máximo y promedio de intensidad en la imagen en grises.
-
-    Qué hace: un solo barrido sobre todos los píxeles para min, max y suma; el promedio
-    es ``suma / (alto * ancho)``.
-
-    Procesa: ``gris`` y dimensiones ``alto``, ``ancho``.
-    Retorna: tupla ``(v_min, v_max, promedio)`` con ``v_min``/``v_max`` en 0..255.
-    """
-    v_min = 255
-    v_max = 0
-    suma = 0
-    n = alto * ancho
-    for y in range(alto):
-        for x in range(ancho):
-            v = gris[y][x]
-            if v < v_min:
-                v_min = v
-            if v > v_max:
-                v_max = v
-            suma += v
-    return v_min, v_max, suma / n
+def estadisticas_basicas(gris: np.ndarray) -> tuple[int, int, float]:
+    """Mínimo, máximo y promedio de intensidad."""
+    v_min = int(gris.min())
+    v_max = int(gris.max())
+    promedio = float(gris.mean())
+    return v_min, v_max, promedio
 
 
 def normalizacion_lineal(
-    gris: list[list[int]], alto: int, ancho: int, v_min: int, v_max: int
-) -> list[list[int]]:
-    """
-    Estira el contraste linealmente al rango 0..255 (procesamiento puntual).
-
-    Qué hace: si ``v_max > v_min``, aplica ``v' = round((v - v_min) * 255 / (v_max - v_min))``
-    por píxel y recorta; si el rango es cero, copia la imagen sin cambio.
-
-    Procesa: ``gris``, dimensiones, y los ``v_min``/``v_max`` ya calculados sobre esa imagen.
-    Retorna: nueva matriz ``salida[y][x]`` en 0..255, mismo tamaño.
-    """
-    salida = [[0 for _ in range(ancho)] for _ in range(alto)]
+    gris: np.ndarray, v_min: int, v_max: int
+) -> np.ndarray:
+    """Estiramiento lineal al rango 0..255 (procesamiento puntual)."""
     rango = v_max - v_min
     if rango == 0:
-        for y in range(alto):
-            for x in range(ancho):
-                salida[y][x] = gris[y][x]
-        return salida
-    factor = 255.0 / rango
-    for y in range(alto):
-        for x in range(ancho):
-            t = int((gris[y][x] - v_min) * factor + 0.5)
-            if t > 255:
-                t = 255
-            elif t < 0:
-                t = 0
-            salida[y][x] = t
-    return salida
+        return gris.copy()
+    g = gris.astype(np.float32)
+    salida = np.rint((g - v_min) * (255.0 / rango))
+    return np.clip(salida, 0, 255).astype(np.uint8)
 
 
-def otsu_umbral(hist: list[int], total_pixeles: int) -> int:
-    """
-    Calcula umbral global de Otsu maximizando la varianza entre clases.
-
-    Qué hace: recorre cortes ``t`` de 0..255 usando solo ``hist`` y ``total_pixeles``;
-    elige el ``t`` que maximiza ``w_b * w_f * (m_b - m_f)²``.
-
-    Procesa: histograma de 256 bins y número total de píxeles.
-    Retorna: entero de umbral en 0..255; si ``total_pixeles == 0``, devuelve ``0``.
-    """
+def otsu_umbral(hist: np.ndarray, total_pixeles: int) -> int:
+    """Umbral de Otsu a partir del histograma (256 bins)."""
     if total_pixeles == 0:
         return 0
-    sum_total = 0
-    for i in range(256):
-        sum_total += i * hist[i]
-    sum_b = 0
-    w_b = 0
+    h = hist.astype(np.float64)
+    sum_total = float(np.dot(np.arange(256, dtype=np.float64), h))
+    sum_b = 0.0
+    w_b = 0.0
     max_var = -1.0
     umbral = 0
     for t in range(256):
-        w_b += hist[t]
+        w_b += h[t]
         if w_b == 0:
             continue
         w_f = total_pixeles - w_b
         if w_f == 0:
             break
-        sum_b += t * hist[t]
+        sum_b += t * h[t]
         m_b = sum_b / w_b
         m_f = (sum_total - sum_b) / w_f
         d = m_b - m_f
@@ -267,99 +172,51 @@ def otsu_umbral(hist: list[int], total_pixeles: int) -> int:
         if var_entre > max_var:
             max_var = var_entre
             umbral = t
-    return umbral
+    return int(umbral)
 
 
 def mascara_umbral(
-    gris: list[list[int]],
-    alto: int,
-    ancho: int,
+    gris: np.ndarray,
     umbral: int,
     segmento_mas_claro: bool,
-) -> list[list[int]]:
-    """
-    Binariza la imagen en gris según un umbral (objeto vs fondo).
-
-    Qué hace: si ``segmento_mas_claro``, objeto = píxeles con gris ``> umbral``; si no,
-    objeto = píxeles ``< umbral``. Objeto → 255, fondo → 0.
-
-    Procesa: ``gris`` de trabajo, dimensiones, ``umbral`` y el criterio booleano.
-    Retorna: ``mascara[y][x]`` en ``{0, 255}``, mismo tamaño.
-    """
-    m = [[0 for _ in range(ancho)] for _ in range(alto)]
-    for y in range(alto):
-        for x in range(ancho):
-            v = gris[y][x]
-            if segmento_mas_claro:
-                m[y][x] = 255 if v > umbral else 0
-            else:
-                m[y][x] = 255 if v < umbral else 0
-    return m
+) -> np.ndarray:
+    """Máscara 0 / 255 según umbral y polaridad (objeto claro u oscuro)."""
+    if segmento_mas_claro:
+        return np.where(gris > umbral, np.uint8(255), np.uint8(0))
+    return np.where(gris < umbral, np.uint8(255), np.uint8(0))
 
 
 def resultado_rojo_sobre_gris_original(
-    gris_original: list[list[int]],
-    mascara: list[list[int]],
-    alto: int,
-    ancho: int,
-) -> list[list[list[int]]]:
-    """
-    Arma imagen BGR: región segmentada en rojo, resto en gris de la luminancia original.
-
-    Qué hace: donde ``mascara == 255`` asigna rojo ``[0,0,255]`` (BGR); en caso contrario
-    ``[v,v,v]`` con ``v`` del gris original (sin mejora puntual).
-
-    Procesa: ``gris_original``, ``mascara`` alineadas, y dimensiones.
-    Retorna: ``out[y][x] = [B, G, R]`` listo para BMP o visualización.
-    """
-    out = [[[0, 0, 0] for _ in range(ancho)] for _ in range(alto)]
-    for y in range(alto):
-        for x in range(ancho):
-            if mascara[y][x] == 255:
-                out[y][x] = [0, 0, 255]
-            else:
-                v = gris_original[y][x]
-                out[y][x] = [v, v, v]
+    gris_original: np.ndarray,
+    mascara: np.ndarray,
+) -> np.ndarray:
+    """BGR: rojo donde máscara==255; fuera, gris = luminancia original en los tres canales."""
+    out = np.empty((*gris_original.shape, 3), dtype=np.uint8)
+    m = mascara == 255
+    out[:, :, 0] = np.where(m, 0, gris_original)
+    out[:, :, 1] = np.where(m, 0, gris_original)
+    out[:, :, 2] = np.where(m, 255, gris_original)
     return out
 
 
-def gris_a_bmp_bgr(gris: list[list[int]], alto: int, ancho: int) -> list[list[list[int]]]:
-    """
-    Duplica el nivel de gris en los tres canales B, G, R para un BMP “en gris”.
-
-    Qué hace: por cada píxel asigna ``[v, v, v]`` en BGR.
-
-    Procesa: ``gris[y][x]`` y dimensiones.
-    Retorna: ``pixeles[y][x] = [B, G, R]`` aptos para ``escribir_bmp_bgr``.
-    """
-    pix = [[[0, 0, 0] for _ in range(ancho)] for _ in range(alto)]
-    for y in range(alto):
-        for x in range(ancho):
-            v = gris[y][x]
-            pix[y][x] = [v, v, v]
-    return pix
+def gris_a_bgr_3c(gris: np.ndarray) -> np.ndarray:
+    """Replica el gris en B, G, R."""
+    return np.stack([gris, gris, gris], axis=-1)
 
 
-def bgr_lista_a_rgb_para_imshow(bgr: list[list[list[int]]]) -> list[list[list[int]]]:
-    """
-    Convierte una imagen en listas de BGR a RGB para ``matplotlib.imshow``.
-
-    Qué hace: intercambia el orden de canales por píxel: ``[B,G,R] → [R,G,B]``.
-
-    Procesa: ``bgr[y][x] = [B, G, R]``.
-    Retorna: misma estructura en RGB (solo para visualización; no altera el pipeline BMP).
-    """
-    return [[[p[2], p[1], p[0]] for p in fila] for fila in bgr]
+def bgr_a_rgb_para_imshow(bgr: np.ndarray) -> np.ndarray:
+    """BGR OpenCV → RGB para matplotlib."""
+    return bgr[..., ::-1]
 
 
 def mostrar_panel_matplotlib(
-    img_bgr: list[list[list[int]]],
-    gris: list[list[int]],
-    gris_trabajo: list[list[int]],
-    mascara: list[list[int]],
-    resultado_bgr: list[list[list[int]]],
-    hist_original: list[int],
-    hist_trabajo: list[int],
+    img_bgr: np.ndarray,
+    gris: np.ndarray,
+    gris_trabajo: np.ndarray,
+    mascara: np.ndarray,
+    resultado_bgr: np.ndarray,
+    hist_original: np.ndarray,
+    hist_trabajo: np.ndarray,
     *,
     umbral: int,
     aplicar_mejora: bool,
@@ -368,18 +225,6 @@ def mostrar_panel_matplotlib(
     guardar_png: bool,
     abrir_ventana: bool,
 ) -> None:
-    """
-    Muestra (y opcionalmente guarda) dos figuras matplotlib: imágenes y luego histogramas.
-
-    Qué hace: figura 1 con entrada, grises, máscara, resultado y texto de parámetros;
-    figura 2 con barras de ``hist_original`` y ``hist_trabajo``. Si ``abrir_ventana``,
-    cierra la primera antes de mostrar la segunda. No recalcula histogramas.
-
-    Procesa: todas las matrices intermedias del pipeline, histogramas ya calculados,
-    rutas PNG, banderas ``guardar_png`` y ``abrir_ventana``, y metadatos ``umbral`` /
-    ``aplicar_mejora``.
-    Retorna: ``None``. Si no hay matplotlib, avisa por stderr y no hace nada.
-    """
     try:
         import matplotlib.pyplot as plt
         from matplotlib.gridspec import GridSpec
@@ -390,11 +235,10 @@ def mostrar_panel_matplotlib(
         )
         return
 
-    rgb_in = bgr_lista_a_rgb_para_imshow(img_bgr)
-    rgb_out = bgr_lista_a_rgb_para_imshow(resultado_bgr)
+    rgb_in = bgr_a_rgb_para_imshow(img_bgr)
+    rgb_out = bgr_a_rgb_para_imshow(resultado_bgr)
     tit_mej = "con mejora puntual" if aplicar_mejora else "sin mejora (copia)"
 
-    # --- Figura 1: solo imágenes ---
     fig_img = plt.figure(figsize=(14, 8), layout="constrained")
     gs = GridSpec(2, 3, figure=fig_img)
 
@@ -405,7 +249,7 @@ def mostrar_panel_matplotlib(
 
     ax = fig_img.add_subplot(gs[0, 1])
     ax.imshow(gris, cmap="gray", vmin=0, vmax=255)
-    ax.set_title("2. Gris (luminancia manual)")
+    ax.set_title("2. Gris (Rec. 601, NumPy)")
     ax.axis("off")
 
     ax = fig_img.add_subplot(gs[0, 2])
@@ -448,15 +292,14 @@ def mostrar_panel_matplotlib(
         plt.show(block=True)
     plt.close(fig_img)
 
-    # --- Figura 2: solo histogramas ---
     fig_hist = plt.figure(figsize=(12, 5), layout="constrained")
     gs2 = GridSpec(1, 2, figure=fig_hist)
-    niveles = list(range(256))
+    niveles = np.arange(256)
 
     ax = fig_hist.add_subplot(gs2[0, 0])
     ax.bar(niveles, hist_original, width=1.0, color="steelblue", align="edge")
     ax.set_xlim(0, 255)
-    ax.set_title("Histograma — gris original (conteos manuales)")
+    ax.set_title("Histograma — gris original (np.bincount)")
     ax.set_xlabel("Nivel de gris")
     ax.set_ylabel("Píxeles")
 
@@ -467,9 +310,7 @@ def mostrar_panel_matplotlib(
     ax.set_xlabel("Nivel de gris")
     ax.set_ylabel("Píxeles")
 
-    fig_hist.suptitle(
-        "Paso 2 de 2 — Histogramas", fontsize=14, fontweight="bold"
-    )
+    fig_hist.suptitle("Paso 2 de 2 — Histogramas", fontsize=14, fontweight="bold")
 
     if guardar_png:
         fig_hist.savefig(ruta_histogramas_png, dpi=140, bbox_inches="tight")
@@ -489,37 +330,23 @@ def procesar(
     mostrar_ventana: bool,
     guardar_panel_png: bool,
 ) -> None:
-    """
-    Ejecuta el pipeline completo: grises, mejora puntual, Otsu o umbral manual,
-    máscara, composición, escritura de BMP, paneles matplotlib y reporte en texto.
-
-    Qué hace: encadena conversión, histogramas, normalización condicional, umbralización,
-    resultado rojo + gris original, guarda cuatro BMP y ``reporte_procesamiento.txt``,
-    y opcionalmente ventanas/PNG de matplotlib.
-
-    Procesa: ruta de entrada, carpeta de salida, umbral manual o automático, criterio
-    de segmentación (objeto claro/oscuro), umbrales de decisión de mejora puntual, y
-    flags de visualización/guardado de paneles.
-    Retorna: ``None``. Termina el proceso con ``SystemExit`` si no se puede leer la entrada.
-    """
     img_bgr = cargar_bgr_opencv(ruta_entrada)
     if img_bgr is None:
         raise SystemExit(f"No se pudo leer la imagen: {ruta_entrada}")
 
-    alto = len(img_bgr)
-    ancho = len(img_bgr[0])
+    alto, ancho = img_bgr.shape[0], img_bgr.shape[1]
 
     gris = a_grises(img_bgr)
-    hist_ini = histograma(gris, alto, ancho)
-    v_min, v_max, promedio = estadisticas_basicas(gris, alto, ancho)
+    hist_ini = histograma(gris)
+    v_min, v_max, promedio = estadisticas_basicas(gris)
 
     aplicar_mejora = promedio < umbral_mejora_bajo or promedio > umbral_mejora_alto
     if aplicar_mejora:
-        gris_trabajo = normalizacion_lineal(gris, alto, ancho, v_min, v_max)
+        gris_trabajo = normalizacion_lineal(gris, v_min, v_max)
     else:
-        gris_trabajo = [[gris[y][x] for x in range(ancho)] for y in range(alto)]
+        gris_trabajo = gris.copy()
 
-    hist_trabajo = histograma(gris_trabajo, alto, ancho)
+    hist_trabajo = histograma(gris_trabajo)
     total = alto * ancho
 
     if umbral_manual is not None:
@@ -527,15 +354,13 @@ def procesar(
     else:
         umbral = otsu_umbral(hist_trabajo, total)
 
-    mascara = mascara_umbral(gris_trabajo, alto, ancho, umbral, segmento_mas_claro)
-    resultado_bgr = resultado_rojo_sobre_gris_original(gris, mascara, alto, ancho)
+    mascara = mascara_umbral(gris_trabajo, umbral, segmento_mas_claro)
+    resultado_bgr = resultado_rojo_sobre_gris_original(gris, mascara)
 
     dir_salida.mkdir(parents=True, exist_ok=True)
-    escribir_bmp_bgr(dir_salida / "gris_original.bmp", gris_a_bmp_bgr(gris, alto, ancho))
-    escribir_bmp_bgr(
-        dir_salida / "gris_trabajo.bmp", gris_a_bmp_bgr(gris_trabajo, alto, ancho)
-    )
-    escribir_bmp_bgr(dir_salida / "mascara.bmp", gris_a_bmp_bgr(mascara, alto, ancho))
+    escribir_bmp_bgr(dir_salida / "gris_original.bmp", gris_a_bgr_3c(gris))
+    escribir_bmp_bgr(dir_salida / "gris_trabajo.bmp", gris_a_bgr_3c(gris_trabajo))
+    escribir_bmp_bgr(dir_salida / "mascara.bmp", gris_a_bgr_3c(mascara))
     escribir_bmp_bgr(dir_salida / "resultado_final.bmp", resultado_bgr)
 
     ruta_panel_img = dir_salida / "panel_imagenes.png"
@@ -561,7 +386,7 @@ def procesar(
 
     reporte = dir_salida / "reporte_procesamiento.txt"
     with open(reporte, "w", encoding="utf-8") as f:
-        f.write("Reporte de procesamiento (valores calculados a mano en el script)\n")
+        f.write("Reporte de procesamiento (pipeline vectorizado con NumPy)\n")
         f.write(f"Entrada: {ruta_entrada}\n")
         f.write(f"Dimensiones: {ancho} x {alto}\n")
         f.write(f"Gris original — min: {v_min}, max: {v_max}, promedio: {promedio:.4f}\n")
@@ -583,21 +408,12 @@ def procesar(
 
 
 def main() -> None:
-    """
-    Punto de entrada: parsea argumentos de línea de comandos y llama a ``procesar``.
-
-    Qué hace: define ``-i``, ``-o``, ``-u``, ``--segmento-oscuro``, umbrales de mejora,
-    ``--no-mostrar`` y ``--no-panel-png``; valida que exista el archivo de entrada.
-
-    Procesa: ``sys.argv`` (vía ``argparse``).
-    Retorna: ``None``. Sale con código 1 si falta el archivo de entrada.
-    """
     root = raiz_proyecto()
     pred_entrada = root / "entrada" / "imagen.jpg"
     pred_salida = root / "salida"
 
     p = argparse.ArgumentParser(
-        description="TP Procesamiento de imagenes — operaciones puntuales manuales."
+        description="TP Procesamiento de imagenes — puntual + histograma (NumPy + OpenCV lectura)."
     )
     p.add_argument(
         "-i",
